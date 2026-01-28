@@ -1,0 +1,307 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTH.JS REQUIRED MODELS
+// ============================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// USER MODEL
+// ============================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerified   DateTime?
+  password        String?
+  username        String    @unique
+  name            String?
+  image           String?
+  bio             String?   @db.Text
+  role            UserRole  @default(USER)
+
+  totalPredictions Int      @default(0)
+  totalWins        Int      @default(0)
+  averageScore     Float?
+  globalRank       Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts    Account[]
+  sessions    Session[]
+  predictions Prediction[]
+  comments    Comment[]
+
+  following Follow[] @relation("Following")
+  followers Follow[] @relation("Followers")
+
+  @@index([username])
+  @@index([globalRank])
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+// ============================================
+// COMPANY MODEL
+// ============================================
+
+model Company {
+  id          String  @id @default(cuid())
+  ticker      String  @unique
+  name        String
+  description String? @db.Text
+  logoUrl     String?
+  sector      String?
+  industry    String?
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  competitions Competition[]
+
+  @@index([ticker])
+}
+
+// ============================================
+// COMPETITION MODEL
+// ============================================
+
+model Competition {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  title       String
+  description String? @db.Text
+  quarter     Int
+  fiscalYear  Int
+
+  earningsDate    DateTime
+  submissionOpen  DateTime
+  submissionClose DateTime
+
+  status CompetitionStatus @default(UPCOMING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  metrics     CompetitionMetric[]
+  predictions Prediction[]
+  results     CompetitionResult?
+
+  @@unique([companyId, quarter, fiscalYear])
+  @@index([status])
+  @@index([earningsDate])
+}
+
+enum CompetitionStatus {
+  UPCOMING
+  OPEN
+  CLOSED
+  SCORING
+  COMPLETED
+  CANCELLED
+}
+
+// ============================================
+// METRIC MODEL
+// ============================================
+
+model CompetitionMetric {
+  id            String      @id @default(cuid())
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+
+  name        String
+  code        MetricCode
+  description String?
+  unit        String?
+  weight      Float      @default(1.0)
+  isRequired  Boolean    @default(true)
+  order       Int        @default(0)
+
+  minValue Float?
+  maxValue Float?
+
+  createdAt DateTime @default(now())
+
+  predictionValues PredictionValue[]
+  actualValue      MetricResult?
+
+  @@unique([competitionId, code])
+  @@index([competitionId])
+}
+
+enum MetricCode {
+  REVENUE
+  EPS
+  NET_INCOME
+  FORWARD_REVENUE_GUIDANCE
+  FORWARD_EPS_GUIDANCE
+  GROSS_MARGIN
+  OPERATING_INCOME
+  FREE_CASH_FLOW
+}
+
+// ============================================
+// PREDICTION MODEL
+// ============================================
+
+model Prediction {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competitionId String
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+
+  totalScore Float?
+  rank       Int?
+
+  isPublic Boolean @default(true)
+
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  values   PredictionValue[]
+  comments Comment[]
+
+  @@unique([userId, competitionId])
+  @@index([competitionId, rank])
+  @@index([userId])
+}
+
+model PredictionValue {
+  id           String            @id @default(cuid())
+  predictionId String
+  prediction   Prediction        @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+  metricId     String
+  metric       CompetitionMetric @relation(fields: [metricId], references: [id], onDelete: Cascade)
+
+  value Float
+
+  error Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([predictionId, metricId])
+  @@index([predictionId])
+}
+
+// ============================================
+// RESULTS MODEL
+// ============================================
+
+model CompetitionResult {
+  id            String      @id @default(cuid())
+  competitionId String      @unique
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+
+  enteredById String
+  enteredAt   DateTime  @default(now())
+  scoredAt    DateTime?
+
+  notes String? @db.Text
+
+  metricResults MetricResult[]
+}
+
+model MetricResult {
+  id       String            @id @default(cuid())
+  resultId String
+  result   CompetitionResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  metricId String            @unique
+  metric   CompetitionMetric @relation(fields: [metricId], references: [id])
+
+  actualValue Float
+  source      String?
+
+  @@index([resultId])
+}
+
+// ============================================
+// SOCIAL MODELS
+// ============================================
+
+model Follow {
+  id          String @id @default(cuid())
+  followerId  String
+  follower    User   @relation("Following", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User   @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model Comment {
+  id           String     @id @default(cuid())
+  content      String     @db.Text
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  predictionId String
+  prediction   Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+
+  parentId String?
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies  Comment[] @relation("CommentReplies")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([predictionId])
+  @@index([userId])
+  @@index([parentId])
+}
